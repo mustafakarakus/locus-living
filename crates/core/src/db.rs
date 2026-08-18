@@ -1,4 +1,4 @@
-//! SQLite WAL + `event_log` (UC-102). Remaining tables are UC-104.
+//! SQLite WAL. One writer thread. Schema on first open.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
@@ -6,6 +6,8 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use homeai_proto::HomeEvent;
+
+use crate::model::{Device, DeviceState, Floor, Person, Property, Room};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -26,6 +28,22 @@ enum Cmd {
         mpsc::Sender<Result<u64, rusqlite::Error>>,
     ),
     Load(mpsc::Sender<Result<Vec<HomeEvent>, rusqlite::Error>>),
+    Tables(mpsc::Sender<Result<Vec<String>, rusqlite::Error>>),
+    PutProperty(Property, mpsc::Sender<Result<(), rusqlite::Error>>),
+    PutFloor(Floor, mpsc::Sender<Result<(), rusqlite::Error>>),
+    PutRoom(Room, mpsc::Sender<Result<(), rusqlite::Error>>),
+    PutDevice(Device, mpsc::Sender<Result<(), rusqlite::Error>>),
+    PutPerson(Person, mpsc::Sender<Result<(), rusqlite::Error>>),
+    GetPerson(
+        String,
+        mpsc::Sender<Result<Option<Person>, rusqlite::Error>>,
+    ),
+    PutDeviceState(DeviceState, mpsc::Sender<Result<(), rusqlite::Error>>),
+    GetDeviceState(
+        String,
+        mpsc::Sender<Result<Option<DeviceState>, rusqlite::Error>>,
+    ),
+    Count(String, mpsc::Sender<Result<i64, rusqlite::Error>>),
     Shutdown,
 }
 
@@ -92,9 +110,58 @@ impl Db {
         Ok(rrx.recv().map_err(|_| DbError::WorkerGone)??)
     }
 
+    pub fn table_names(&self) -> Result<Vec<String>, DbError> {
+        call(&self.tx, Cmd::Tables)
+    }
+
+    pub fn put_property(&self, row: Property) -> Result<(), DbError> {
+        call(&self.tx, |s| Cmd::PutProperty(row, s))
+    }
+
+    pub fn put_floor(&self, row: Floor) -> Result<(), DbError> {
+        call(&self.tx, |s| Cmd::PutFloor(row, s))
+    }
+
+    pub fn put_room(&self, row: Room) -> Result<(), DbError> {
+        call(&self.tx, |s| Cmd::PutRoom(row, s))
+    }
+
+    pub fn put_device(&self, row: Device) -> Result<(), DbError> {
+        call(&self.tx, |s| Cmd::PutDevice(row, s))
+    }
+
+    pub fn put_person(&self, row: Person) -> Result<(), DbError> {
+        call(&self.tx, |s| Cmd::PutPerson(row, s))
+    }
+
+    pub fn get_person(&self, id: &str) -> Result<Option<Person>, DbError> {
+        call(&self.tx, |s| Cmd::GetPerson(id.into(), s))
+    }
+
+    pub fn put_device_state(&self, row: DeviceState) -> Result<(), DbError> {
+        call(&self.tx, |s| Cmd::PutDeviceState(row, s))
+    }
+
+    pub fn get_device_state(&self, device_id: &str) -> Result<Option<DeviceState>, DbError> {
+        call(&self.tx, |s| Cmd::GetDeviceState(device_id.into(), s))
+    }
+
+    pub fn count(&self, table: &str) -> Result<i64, DbError> {
+        call(&self.tx, |s| Cmd::Count(table.into(), s))
+    }
+
     pub fn close(&self) {
         let _ = self.tx.send(Cmd::Shutdown);
     }
+}
+
+fn call<T>(
+    tx: &mpsc::Sender<Cmd>,
+    build: impl FnOnce(mpsc::Sender<Result<T, rusqlite::Error>>) -> Cmd,
+) -> Result<T, DbError> {
+    let (rtx, rrx) = mpsc::channel();
+    tx.send(build(rtx)).map_err(|_| DbError::WorkerGone)?;
+    Ok(rrx.recv().map_err(|_| DbError::WorkerGone)??)
 }
 
 fn worker(path: PathBuf, rx: mpsc::Receiver<Cmd>) {
@@ -120,6 +187,36 @@ fn worker(path: PathBuf, rx: mpsc::Receiver<Cmd>) {
             Cmd::Load(reply) => {
                 let _ = reply.send(load_events(&conn));
             }
+            Cmd::Tables(reply) => {
+                let _ = reply.send(list_tables(&conn));
+            }
+            Cmd::PutProperty(row, reply) => {
+                let _ = reply.send(put_property(&conn, &row));
+            }
+            Cmd::PutFloor(row, reply) => {
+                let _ = reply.send(put_floor(&conn, &row));
+            }
+            Cmd::PutRoom(row, reply) => {
+                let _ = reply.send(put_room(&conn, &row));
+            }
+            Cmd::PutDevice(row, reply) => {
+                let _ = reply.send(put_device(&conn, &row));
+            }
+            Cmd::PutPerson(row, reply) => {
+                let _ = reply.send(put_person(&conn, &row));
+            }
+            Cmd::GetPerson(id, reply) => {
+                let _ = reply.send(get_person(&conn, &id));
+            }
+            Cmd::PutDeviceState(row, reply) => {
+                let _ = reply.send(put_device_state(&conn, &row));
+            }
+            Cmd::GetDeviceState(id, reply) => {
+                let _ = reply.send(get_device_state(&conn, &id));
+            }
+            Cmd::Count(table, reply) => {
+                let _ = reply.send(count_table(&conn, &table));
+            }
             Cmd::Shutdown => break,
         }
     }
@@ -130,24 +227,7 @@ fn open_and_migrate(path: &Path) -> rusqlite::Result<rusqlite::Connection> {
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS event_log (
-            event_id TEXT PRIMARY KEY,
-            event_type TEXT NOT NULL,
-            source_id TEXT NOT NULL,
-            room_id TEXT NOT NULL,
-            person_id TEXT NOT NULL,
-            timestamp_ms INTEGER NOT NULL,
-            confidence REAL NOT NULL,
-            payload BLOB NOT NULL,
-            schema_version INTEGER NOT NULL,
-            ingested_at_ms INTEGER NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS event_log_type_ts
-            ON event_log (event_type, timestamp_ms);
-        ",
-    )?;
+    conn.execute_batch(include_str!("schema.sql"))?;
     Ok(conn)
 }
 
@@ -206,6 +286,102 @@ fn load_events(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<HomeEvent>> 
     rows.collect()
 }
 
+fn list_tables(conn: &rusqlite::Connection) -> rusqlite::Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    )?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+    rows.collect()
+}
+
+fn put_property(conn: &rusqlite::Connection, row: &Property) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO property (id, name) VALUES (?1, ?2)",
+        rusqlite::params![row.id, row.name],
+    )?;
+    Ok(())
+}
+
+fn put_floor(conn: &rusqlite::Connection, row: &Floor) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO floor (id, property_id, name) VALUES (?1, ?2, ?3)",
+        rusqlite::params![row.id, row.property_id, row.name],
+    )?;
+    Ok(())
+}
+
+fn put_room(conn: &rusqlite::Connection, row: &Room) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO room (id, floor_id, name, kind) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![row.id, row.floor_id, row.name, row.kind],
+    )?;
+    Ok(())
+}
+
+fn put_device(conn: &rusqlite::Connection, row: &Device) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO device (id, room_id, name, kind, protocol) VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![row.id, row.room_id, row.name, row.kind, row.protocol],
+    )?;
+    Ok(())
+}
+
+fn put_person(conn: &rusqlite::Connection, row: &Person) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO person (id, name, kind) VALUES (?1, ?2, ?3)",
+        rusqlite::params![row.id, row.name, row.kind],
+    )?;
+    Ok(())
+}
+
+fn get_person(conn: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Person>> {
+    let mut stmt = conn.prepare("SELECT id, name, kind FROM person WHERE id = ?1")?;
+    let mut rows = stmt.query(rusqlite::params![id])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(Person {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            kind: row.get(2)?,
+        })),
+        None => Ok(None),
+    }
+}
+
+fn put_device_state(conn: &rusqlite::Connection, row: &DeviceState) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO device_state (device_id, state_json, updated_ms) VALUES (?1, ?2, ?3)",
+        rusqlite::params![row.device_id, row.state_json, row.updated_ms],
+    )?;
+    Ok(())
+}
+
+fn get_device_state(
+    conn: &rusqlite::Connection,
+    device_id: &str,
+) -> rusqlite::Result<Option<DeviceState>> {
+    let mut stmt = conn.prepare(
+        "SELECT device_id, state_json, updated_ms FROM device_state WHERE device_id = ?1",
+    )?;
+    let mut rows = stmt.query(rusqlite::params![device_id])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(DeviceState {
+            device_id: row.get(0)?,
+            state_json: row.get(1)?,
+            updated_ms: row.get(2)?,
+        })),
+        None => Ok(None),
+    }
+}
+
+fn count_table(conn: &rusqlite::Connection, table: &str) -> rusqlite::Result<i64> {
+    if !crate::model::REQUIRED_TABLES.contains(&table) {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+        row.get(0)
+    })
+}
+
 pub fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -226,5 +402,15 @@ mod tests {
         db.close();
         let db = Db::open(&path).unwrap();
         db.ping().unwrap();
+    }
+
+    #[test]
+    fn first_open_creates_every_required_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join("home.db")).unwrap();
+        let names = db.table_names().unwrap();
+        for table in crate::model::REQUIRED_TABLES {
+            assert!(names.iter().any(|n| n == table), "missing table {table}");
+        }
     }
 }

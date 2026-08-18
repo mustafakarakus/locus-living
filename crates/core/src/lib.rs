@@ -10,6 +10,7 @@ pub mod bus;
 pub mod db;
 pub mod health;
 pub mod logging;
+pub mod model;
 pub mod supervisor;
 pub mod tls;
 

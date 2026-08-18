@@ -105,19 +105,22 @@ token files refuse to load. Full endpoint lock-down is UC-106.
 **Dependencies:** UC-101.
 
 ### UC-104 — Local Storage (SQLite)
-**Status:** TODO
+**Status:** DONE
 **Problem:** People, devices, state, and events must persist across reboots.
 **Solution:** Open SQLite in WAL mode at `/var/lib/homeai/home.db`; create schema on first boot.
 Tables: `property, floor, room, device, sensor, device_state, person, identity_signal,
 presence_event, automation, automation_rule, automation_execution, event_log, home_memory,
 user_preference, conversation_session, system_health`. Single `Db` struct owns access.
 **Acceptance:**
-- [ ] Schema auto-created on first boot.
-- [ ] Writes survive reboot.
-- [ ] All data stays on local disk.
+- [x] Schema auto-created on first boot.
+- [x] Writes survive reboot.
+- [x] All data stays on local disk.
 **Tests:**
-- [ ] Insert person + device state, reboot, verify present.
-- [ ] Concurrent writes do not corrupt DB.
+- [x] Insert person + device state, reboot, verify present.
+- [x] Concurrent writes do not corrupt DB.
+**Notes:** Schema lives in `crates/core/src/schema.sql`. Also creates `conversation_attachment`
+(techstack §9). One writer thread; 400 concurrent person inserts stay consistent after reopen.
+House CRUD over HTTP is the next slice. Reopen stands in for reboot on this Mac.
 **Dependencies:** UC-101.
 
 ### UC-105 — House & Room Model + CRUD API
