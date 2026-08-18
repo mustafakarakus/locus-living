@@ -1,0 +1,50 @@
+syntax = "proto3";
+package homeai;
+
+// Canonical wire schema. crates/proto generates Rust from this file (UC-102).
+// Do not fork a second schema. Bump schema_version when the event shape changes.
+
+message HomeEvent {
+  string event_id = 1;
+  string event_type = 2;
+  string source_id = 3;
+  string room_id = 4;
+  string person_id = 5;
+  int64 timestamp_ms = 6;
+  double confidence = 7;
+  bytes payload = 8;
+  uint32 schema_version = 9;
+}
+
+service NodeService {
+  rpc Register(NodeInfo) returns (RegisterAck);
+  rpc StreamEvents(stream HomeEvent) returns (stream NodeCommand);
+  rpc Health(NodeHealthRequest) returns (NodeHealth);
+}
+
+message NodeInfo {
+  string node_id = 1;
+  string room_id = 2;
+  repeated string capabilities = 3;
+}
+
+message RegisterAck {
+  bool ok = 1;
+  string assigned_room_id = 2;
+}
+
+message NodeCommand {
+  string command_id = 1;
+  string target_device_id = 2;
+  string action = 3;
+  bytes params = 4;
+}
+
+message NodeHealthRequest {
+  string node_id = 1;
+}
+
+message NodeHealth {
+  string status = 1;
+  int64 uptime_s = 2;
+}

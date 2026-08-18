@@ -1,0 +1,10 @@
+[project]
+name = "homeai-stt"
+version = "0.0.0"
+description = "STT façade on :8100 — Qwen3-ASR primary, whisper.cpp fallback."
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

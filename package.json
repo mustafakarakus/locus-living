@@ -1,0 +1,9 @@
+{
+  "name": "homeai",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Home AI monorepo — Vite workspace for the cinematic landing only. Native apps are Xcode/Gradle.",
+  "workspaces": [
+    "apps/web"
+  ]
+}

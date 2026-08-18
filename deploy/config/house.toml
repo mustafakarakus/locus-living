@@ -1,0 +1,15 @@
+# Example /etc/homeai/house.toml — seeded on first boot (UC-105).
+# property → floor → room. Replace with the real house at install time.
+
+[property]
+name = "Demo House"
+
+[[floor]]
+id = "floor-1"
+name = "Ground"
+
+[[room]]
+id = "room-kitchen"
+floor_id = "floor-1"
+name = "Kitchen"
+kind = "indoor"

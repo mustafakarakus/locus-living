@@ -1,0 +1,38 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/common",
+    "crates/proto",
+    "crates/core",
+    "crates/noded",
+    "crates/cli",
+    "tools/simulator",
+]
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "UNLICENSED"
+rust-version = "1.80"
+
+[workspace.dependencies]
+homeai-common = { path = "crates/common" }
+homeai-proto = { path = "crates/proto" }
+
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+axum = "0.8"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+tonic = { version = "0.12", features = ["transport", "tls"] }
+tonic-health = "0.12"
+rusqlite = { version = "0.32", features = ["bundled"] }
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-appender = "0.2"
+thiserror = "2"
+anyhow = "1"
+rcgen = "0.13"
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }

@@ -1,0 +1,10 @@
+[package]
+name = "homeai-proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Protobuf types and NodeService. Generated from proto/homeai.proto (UC-102)."
+
+[dependencies]
+homeai-common.workspace = true

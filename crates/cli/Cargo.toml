@@ -1,0 +1,14 @@
+[package]
+name = "homeai-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Admin CLI: provision, tokens, backup/restore."
+
+[[bin]]
+name = "homeai"
+path = "src/main.rs"
+
+[dependencies]
+homeai-common.workspace = true

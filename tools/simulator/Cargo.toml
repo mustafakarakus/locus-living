@@ -1,0 +1,15 @@
+[package]
+name = "homeai-simulator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Virtual house simulator for CI and the Demo Script (UC-134)."
+
+[[bin]]
+name = "homeai-sim"
+path = "src/main.rs"
+
+[dependencies]
+homeai-common.workspace = true
+homeai-proto.workspace = true

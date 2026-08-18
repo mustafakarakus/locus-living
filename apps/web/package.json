@@ -1,0 +1,6 @@
+{
+  "name": "@homeai/web",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Cinematic Three.js landing. Never talks to a Home Core."
+}

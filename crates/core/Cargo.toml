@@ -1,0 +1,15 @@
+[package]
+name = "homeai-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Home Core: supervisor, event bus, local API, and product agents."
+
+[[bin]]
+name = "homeai-core"
+path = "src/main.rs"
+
+[dependencies]
+homeai-common.workspace = true
+homeai-proto.workspace = true

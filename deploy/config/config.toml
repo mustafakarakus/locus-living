@@ -1,0 +1,22 @@
+# Example /etc/homeai/config.toml — see UC-103.
+
+[api]
+port = 8443
+
+[grpc]
+port = 50051
+
+[llm]
+url = "http://127.0.0.1:8200"
+
+[stt]
+url = "http://127.0.0.1:8100"
+
+[tts]
+url = "http://127.0.0.1:8300"
+
+[presence]
+exit_delay_ms = 30000
+
+[wake]
+keyword = "hey home"

@@ -1,0 +1,6 @@
+# Example /etc/homeai/models.toml — tier binds models, not a hardware brand (UC-237).
+
+tier = "T2"
+
+# Paths are resolved via /opt/homeai/models/current/ on the Core.
+# Do not hand-edit a production Core; swap via a signed update (UC-234).

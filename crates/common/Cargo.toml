@@ -1,0 +1,9 @@
+[package]
+name = "homeai-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Shared types, paths, and config for Home AI."
+
+[dependencies]

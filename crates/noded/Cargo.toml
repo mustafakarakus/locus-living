@@ -1,0 +1,15 @@
+[package]
+name = "homeai-noded"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Full room node daemon: sensors, mic, speaker, BLE, gRPC to Core."
+
+[[bin]]
+name = "homeai-noded"
+path = "src/main.rs"
+
+[dependencies]
+homeai-common.workspace = true
+homeai-proto.workspace = true

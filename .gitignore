@@ -1,0 +1,35 @@
+ideas.md
+CLAUDE.local.md
+
+# Rust
+/target
+**/*.rs.bk
+
+# Node
+node_modules/
+dist/
+.next/
+.astro/
+.expo/
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local Core prefix (HOMEAI_PREFIX=./.run)
+.run/
+
+# Models and local data — never commit
+/models/
+*.gguf
+*.onnx
+home.db
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
