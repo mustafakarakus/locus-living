@@ -1,5 +1,7 @@
-fn main() {
-    // UC-101: load config, open DB, start bus + supervisor, bind :8443 and :50051.
-    eprintln!("homeai-core: stub — implement UC-101");
-    std::process::exit(1);
+#[tokio::main]
+async fn main() {
+    if let Err(err) = homeai_core::run().await {
+        eprintln!("homeai-core failed: {err:#}");
+        std::process::exit(1);
+    }
 }

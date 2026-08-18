@@ -1,0 +1,7 @@
+;; macOS sandbox: no WAN, loopback only. Used by scripts/uc101-offline-verify.sh
+(version 1)
+(allow default)
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-bind)
+(allow network-inbound)

@@ -25,6 +25,9 @@ axum = "0.8"
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tonic = { version = "0.12", features = ["transport", "tls"] }
 tonic-health = "0.12"
+tonic-build = "0.12"
+prost = "0.13"
+protoc-bin-vendored = "3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }

@@ -1,0 +1,21 @@
+[Unit]
+Description=Home AI Core
+# WAN down must not block boot (UC-101). Do not wait for network-online.
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/homeai-core
+Restart=on-failure
+RestartSec=2
+StartLimitIntervalSec=60
+StartLimitBurst=5
+# Creates /etc/homeai, /var/lib/homeai, /var/log/homeai when missing.
+ConfigurationDirectory=homeai
+StateDirectory=homeai
+LogsDirectory=homeai
+# Production uses techstack §4 absolute paths. Do not set HOMEAI_PREFIX here.
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

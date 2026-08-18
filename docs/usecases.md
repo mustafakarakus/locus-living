@@ -34,27 +34,34 @@ This milestone contains every use case required to reach that state — no more,
 ## Foundation
 
 ### UC-101 — Core Runtime & Service Supervisor
-**Status:** TODO
+**Status:** PARTIAL
 **Problem:** The house needs a local brain that runs continuously and supervises services.
 **Solution:** Implement `homeai-core` (Rust, tokio). On start it loads `/etc/homeai/config.toml`,
 opens SQLite at `/var/lib/homeai/home.db`, starts the event bus, binds the local API on `:8443`,
 binds Node gRPC on `:50051`, and runs a supervisor that restarts failed internal tasks with
 exponential backoff and raises a health alert after repeated crash loops (no unbounded restart
 storms). Runs as `homeai-core.service`.
+Dev machines set `HOMEAI_PREFIX` so the same tree lives under that directory (techstack §4).
 **Acceptance:**
 - [ ] Boots from systemd and survives reboot.
-- [ ] Runs with WAN disconnected.
-- [ ] Binds 8443 and 50051.
-- [ ] Restarts a crashed internal task within 2s; repeated crashes back off and alert.
-- [ ] Writes JSON logs to `/var/log/homeai/core.log`.
+- [x] Runs with WAN disconnected.
+- [x] Binds 8443 and 50051.
+- [x] Restarts a crashed internal task within 2s; repeated crashes back off and alert.
+- [x] Writes JSON logs to `/var/log/homeai/core.log`.
 **Tests:**
 - [ ] `systemctl restart homeai-core` → healthy.
-- [ ] Disconnect WAN → API still responds.
-- [ ] Kill an internal task → supervisor restarts it.
+- [x] Disconnect WAN → API still responds.
+- [x] Kill an internal task → supervisor restarts it.
+**Notes:** WAN was verified on macOS: process has no remote ESTABLISHED TCP after boot, and
+`scripts/uc101-offline-verify.sh` serves `/api/v1/health` under a sandbox that denies WAN.
+Unit file is `deploy/systemd/homeai-core.service` (starts after `local-fs.target`, not
+`network-online`). systemd start/restart/reboot is `scripts/uc101-linux-verify.sh` — needs
+Ubuntu; this Mac has no systemctl. Full API auth is UC-106; NodeService mTLS is UC-107;
+event persist is UC-102; schema is UC-104.
 **Dependencies:** None.
 
 ### UC-102 — Event Bus & Protobuf Schema
-**Status:** TODO
+**Status:** DONE
 **Problem:** All components need one typed channel for events.
 **Solution:** In-process tokio broadcast bus carrying `homeai.HomeEvent` (techstack §7).
 Every published event is appended to the `event_log` table in `home.db` (SQLite WAL) before ack —
@@ -64,13 +71,17 @@ Retention is policy-driven per event type (e.g. raw presence signals 24h, event_
 enforced by a periodic `DELETE` — no unbounded growth, no unbounded surveillance record.
 Provide `bus.publish(event)` and `bus.subscribe(event_type)`.
 **Acceptance:**
-- [ ] Pub/sub works for all event types.
-- [ ] Events persist to `event_log` before ack.
-- [ ] A slow subscriber does not block a fast publisher.
-- [ ] Retention policy enforced (no unbounded growth).
+- [x] Pub/sub works for all event types.
+- [x] Events persist to `event_log` before ack.
+- [x] A slow subscriber does not block a fast publisher.
+- [x] Retention policy enforced (no unbounded growth).
 **Tests:**
-- [ ] Publish 1000 events → all received in order.
-- [ ] Kill core mid-publish, restart → no acked event lost.
+- [x] Publish 1000 events → all received in order.
+- [x] Kill core mid-publish, restart → no acked event lost.
+**Notes:** Types generated from `proto/homeai.proto` into `homeai-proto`. `publish` acks only after
+`INSERT OR IGNORE` on `event_log`. Reopen sees every acked row. Invalid `schema_version` /
+empty id/type / bad confidence is dropped. Retention: `presence.raw` and `presence.signal` 24h,
+everything else 90d, swept by the supervised `retention` task.
 **Dependencies:** UC-101.
 
 ### UC-103 — Configuration & Secrets

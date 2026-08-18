@@ -1,4 +1,10 @@
-//! Shared constants and paths. Matches `docs/techstack.md` §3–§4.
+//! Shared constants, paths, and config. Matches `docs/techstack.md` §3–§4.
+
+mod config;
+mod paths;
+
+pub use config::{ApiConfig, Config, ConfigError, GrpcConfig};
+pub use paths::Paths;
 
 pub const API_PORT: u16 = 8443;
 pub const GRPC_PORT: u16 = 50051;

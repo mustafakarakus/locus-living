@@ -7,4 +7,9 @@ rust-version.workspace = true
 description = "Protobuf types and NodeService. Generated from proto/homeai.proto (UC-102)."
 
 [dependencies]
-homeai-common.workspace = true
+prost.workspace = true
+tonic.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true
+protoc-bin-vendored.workspace = true
