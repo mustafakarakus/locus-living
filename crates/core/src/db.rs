@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use homeai_proto::HomeEvent;
 
-use crate::model::{Device, DeviceState, Floor, Person, Property, Room};
+use crate::model::{Device, DeviceState, Floor, House, Person, Property, Room, Sensor};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -44,6 +44,16 @@ enum Cmd {
         mpsc::Sender<Result<Option<DeviceState>, rusqlite::Error>>,
     ),
     Count(String, mpsc::Sender<Result<i64, rusqlite::Error>>),
+    LoadHouse(mpsc::Sender<Result<House, rusqlite::Error>>),
+    PutSensor(Sensor, mpsc::Sender<Result<(), rusqlite::Error>>),
+    GetRoom(String, mpsc::Sender<Result<Option<Room>, rusqlite::Error>>),
+    GetDevice(
+        String,
+        mpsc::Sender<Result<Option<Device>, rusqlite::Error>>,
+    ),
+    DeleteRoom(String, mpsc::Sender<Result<bool, rusqlite::Error>>),
+    DeleteDevice(String, mpsc::Sender<Result<bool, rusqlite::Error>>),
+    DeleteSensor(String, mpsc::Sender<Result<bool, rusqlite::Error>>),
     Shutdown,
 }
 
@@ -150,6 +160,34 @@ impl Db {
         call(&self.tx, |s| Cmd::Count(table.into(), s))
     }
 
+    pub fn load_house(&self) -> Result<House, DbError> {
+        call(&self.tx, Cmd::LoadHouse)
+    }
+
+    pub fn put_sensor(&self, row: Sensor) -> Result<(), DbError> {
+        call(&self.tx, |s| Cmd::PutSensor(row, s))
+    }
+
+    pub fn get_room(&self, id: &str) -> Result<Option<Room>, DbError> {
+        call(&self.tx, |s| Cmd::GetRoom(id.into(), s))
+    }
+
+    pub fn get_device(&self, id: &str) -> Result<Option<Device>, DbError> {
+        call(&self.tx, |s| Cmd::GetDevice(id.into(), s))
+    }
+
+    pub fn delete_room(&self, id: &str) -> Result<bool, DbError> {
+        call(&self.tx, |s| Cmd::DeleteRoom(id.into(), s))
+    }
+
+    pub fn delete_device(&self, id: &str) -> Result<bool, DbError> {
+        call(&self.tx, |s| Cmd::DeleteDevice(id.into(), s))
+    }
+
+    pub fn delete_sensor(&self, id: &str) -> Result<bool, DbError> {
+        call(&self.tx, |s| Cmd::DeleteSensor(id.into(), s))
+    }
+
     pub fn close(&self) {
         let _ = self.tx.send(Cmd::Shutdown);
     }
@@ -216,6 +254,27 @@ fn worker(path: PathBuf, rx: mpsc::Receiver<Cmd>) {
             }
             Cmd::Count(table, reply) => {
                 let _ = reply.send(count_table(&conn, &table));
+            }
+            Cmd::LoadHouse(reply) => {
+                let _ = reply.send(load_house(&conn));
+            }
+            Cmd::PutSensor(row, reply) => {
+                let _ = reply.send(put_sensor(&conn, &row));
+            }
+            Cmd::GetRoom(id, reply) => {
+                let _ = reply.send(get_room(&conn, &id));
+            }
+            Cmd::GetDevice(id, reply) => {
+                let _ = reply.send(get_device(&conn, &id));
+            }
+            Cmd::DeleteRoom(id, reply) => {
+                let _ = reply.send(delete_by_id(&conn, "room", &id));
+            }
+            Cmd::DeleteDevice(id, reply) => {
+                let _ = reply.send(delete_by_id(&conn, "device", &id));
+            }
+            Cmd::DeleteSensor(id, reply) => {
+                let _ = reply.send(delete_by_id(&conn, "sensor", &id));
             }
             Cmd::Shutdown => break,
         }
@@ -371,6 +430,126 @@ fn get_device_state(
         })),
         None => Ok(None),
     }
+}
+
+fn put_sensor(conn: &rusqlite::Connection, row: &Sensor) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT OR REPLACE INTO sensor (id, room_id, device_id, kind) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![row.id, row.room_id, row.device_id, row.kind],
+    )?;
+    Ok(())
+}
+
+fn get_room(conn: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Room>> {
+    let mut stmt = conn.prepare("SELECT id, floor_id, name, kind FROM room WHERE id = ?1")?;
+    let mut rows = stmt.query(rusqlite::params![id])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(Room {
+            id: row.get(0)?,
+            floor_id: row.get(1)?,
+            name: row.get(2)?,
+            kind: row.get(3)?,
+        })),
+        None => Ok(None),
+    }
+}
+
+fn get_device(conn: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Device>> {
+    let mut stmt =
+        conn.prepare("SELECT id, room_id, name, kind, protocol FROM device WHERE id = ?1")?;
+    let mut rows = stmt.query(rusqlite::params![id])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(Device {
+            id: row.get(0)?,
+            room_id: row.get(1)?,
+            name: row.get(2)?,
+            kind: row.get(3)?,
+            protocol: row.get(4)?,
+        })),
+        None => Ok(None),
+    }
+}
+
+fn delete_by_id(conn: &rusqlite::Connection, table: &str, id: &str) -> rusqlite::Result<bool> {
+    if !matches!(table, "room" | "device" | "sensor") {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    let n = conn.execute(
+        &format!("DELETE FROM {table} WHERE id = ?1"),
+        rusqlite::params![id],
+    )?;
+    Ok(n > 0)
+}
+
+fn load_house(conn: &rusqlite::Connection) -> rusqlite::Result<House> {
+    let property = {
+        let mut stmt = conn.prepare("SELECT id, name FROM property LIMIT 1")?;
+        let mut rows = stmt.query([])?;
+        match rows.next()? {
+            Some(row) => Some(Property {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            }),
+            None => None,
+        }
+    };
+    let floors = {
+        let mut stmt = conn.prepare("SELECT id, property_id, name FROM floor ORDER BY name")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Floor {
+                id: row.get(0)?,
+                property_id: row.get(1)?,
+                name: row.get(2)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let rooms = {
+        let mut stmt = conn.prepare("SELECT id, floor_id, name, kind FROM room ORDER BY name")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Room {
+                id: row.get(0)?,
+                floor_id: row.get(1)?,
+                name: row.get(2)?,
+                kind: row.get(3)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let devices = {
+        let mut stmt =
+            conn.prepare("SELECT id, room_id, name, kind, protocol FROM device ORDER BY name")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Device {
+                id: row.get(0)?,
+                room_id: row.get(1)?,
+                name: row.get(2)?,
+                kind: row.get(3)?,
+                protocol: row.get(4)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let sensors = {
+        let mut stmt =
+            conn.prepare("SELECT id, room_id, device_id, kind FROM sensor ORDER BY kind")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(Sensor {
+                id: row.get(0)?,
+                room_id: row.get(1)?,
+                device_id: row.get(2)?,
+                kind: row.get(3)?,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    Ok(House {
+        property,
+        floors,
+        rooms,
+        devices,
+        sensors,
+    })
 }
 
 fn count_table(conn: &rusqlite::Connection, table: &str) -> rusqlite::Result<i64> {

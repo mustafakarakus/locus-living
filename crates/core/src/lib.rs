@@ -9,6 +9,7 @@ pub mod api;
 pub mod bus;
 pub mod db;
 pub mod health;
+pub mod house;
 pub mod logging;
 pub mod model;
 pub mod supervisor;
@@ -39,6 +40,8 @@ pub enum Error {
     Db(#[from] db::DbError),
     #[error(transparent)]
     Token(#[from] homeai_common::TokenError),
+    #[error(transparent)]
+    House(#[from] house::HouseError),
     #[error("{0}")]
     Other(String),
 }
@@ -77,13 +80,24 @@ pub async fn run_with(paths: Paths, shutdown: Option<CancellationToken>) -> Resu
 
     let db = Db::open(&paths.db)?;
     info!(db = %paths.db.display(), "sqlite opened (WAL)");
+    match crate::house::seed_if_empty(&db, &paths.house) {
+        Ok(true) => info!(file = %paths.house.display(), "house model seeded"),
+        Ok(false) => {}
+        Err(err) => return Err(err.into()),
+    }
 
     let bus = Bus::new(db.clone());
     let health = HealthState::new();
     let shutdown = shutdown.unwrap_or_else(CancellationToken::new);
     let supervisor = Supervisor::new(bus.clone(), health.clone(), shutdown.clone());
 
-    spawn_api(&supervisor, config.clone(), paths.clone(), health.clone());
+    spawn_api(
+        &supervisor,
+        config.clone(),
+        paths.clone(),
+        health.clone(),
+        db.clone(),
+    );
     spawn_grpc(&supervisor, config.clone(), paths.clone());
     spawn_retention(&supervisor, bus.clone());
 
@@ -109,13 +123,14 @@ pub async fn run_with(paths: Paths, shutdown: Option<CancellationToken>) -> Resu
     Ok(())
 }
 
-fn spawn_api(supervisor: &Supervisor, config: Config, paths: Paths, health: HealthState) {
+fn spawn_api(supervisor: &Supervisor, config: Config, paths: Paths, health: HealthState, db: Db) {
     supervisor.spawn("api", move |_child| {
         let config = config.clone();
         let paths = paths.clone();
         let health = health.clone();
+        let db = db.clone();
         async move {
-            api::serve(config, paths, health).await.map_err(|err| {
+            api::serve(config, paths, health, db).await.map_err(|err| {
                 error!(error = %err, "api task failed");
                 anyhow::anyhow!(err)
             })

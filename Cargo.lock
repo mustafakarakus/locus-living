@@ -693,6 +693,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-util",
+ "toml",
  "tonic",
  "tonic-health",
  "tracing",

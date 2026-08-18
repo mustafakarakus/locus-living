@@ -124,19 +124,22 @@ House CRUD over HTTP is the next slice. Reopen stands in for reboot on this Mac.
 **Dependencies:** UC-101.
 
 ### UC-105 — House & Room Model + CRUD API
-**Status:** TODO
+**Status:** DONE
 **Problem:** The system must know the physical structure of the house.
 **Solution:** Represent `property → floor → room → device/sensor`. Seed from `/etc/homeai/house.toml`
 on first boot. Expose CRUD over the Local API. Each room has `room_id`, `name`, `floor_id`, and a
 `kind` (indoor room, garage, garden, attic, …) so outdoor and non-room zones fit the same model
 later without schema migration.
 **Acceptance:**
-- [ ] House, floors, rooms queryable via API.
-- [ ] Devices and sensors attach to rooms.
-- [ ] AI can query structure via the API.
+- [x] House, floors, rooms queryable via API.
+- [x] Devices and sensors attach to rooms.
+- [x] AI can query structure via the API.
 **Tests:**
-- [ ] Seed a two-floor house, query it.
-- [ ] Add a device to a room, verify relationship.
+- [x] Seed a two-floor house, query it.
+- [x] Add a device to a room, verify relationship.
+**Notes:** Seed runs only when `property` is empty. GET house/rooms/devices/sensors needs `read`.
+POST/DELETE need `control`. Room `kind` is a string (`indoor`, `garden`, …). Presence on
+room detail is an empty list until presence lands. Auth on remaining routes is the next slice.
 **Dependencies:** UC-104.
 
 ### UC-106 — Local API Server (REST + WebSocket)
