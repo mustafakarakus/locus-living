@@ -1,22 +1,29 @@
-//! Local HTTPS API (house CRUD + health/status). Full contract lock-down is later.
+//! Local HTTPS + WSS API. Techstack §8 contract (UC-106).
+
+mod auth;
+mod ws;
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use axum::extract::{Path, State};
-use axum::http::{header, HeaderMap, StatusCode};
-use axum::routing::{delete, get};
+use axum::http::StatusCode;
+use axum::routing::{delete, get, post};
 use axum::Json;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
-use homeai_common::{AuthFail, Config, Paths, Scope, TokenStore};
+use homeai_common::{Config, Paths, TokenRecord};
 use serde::{Deserialize, Serialize};
 use tonic_health::server::HealthReporter;
 use tracing::info;
 
-use crate::db::Db;
+use crate::bus::{core_event, Bus};
+use crate::db::{now_ms, Db};
 use crate::health::HealthState;
 use crate::model::{Device, Room, Sensor};
 use crate::Error;
+
+use self::auth::{AdminAuth, AuthLimiter, ControlAuth, ReadAuth};
 
 #[derive(Clone)]
 struct ApiState {
@@ -24,15 +31,41 @@ struct ApiState {
     paths: Paths,
     config: Config,
     db: Db,
+    bus: Bus,
+    limiter: AuthLimiter,
 }
 
-pub async fn serve(config: Config, paths: Paths, health: HealthState, db: Db) -> Result<(), Error> {
+pub async fn serve(
+    config: Config,
+    paths: Paths,
+    health: HealthState,
+    db: Db,
+    bus: Bus,
+) -> Result<(), Error> {
     let addr = config.api_addr()?;
     let tls = RustlsConfig::from_pem_file(paths.tls_cert(), paths.tls_key())
         .await
         .map_err(|e| Error::Other(format!("api tls: {e}")))?;
 
-    let app = Router::new()
+    let app = router(ApiState {
+        health,
+        paths,
+        config,
+        db,
+        bus,
+        limiter: AuthLimiter::new(),
+    });
+
+    info!(%addr, "api listening (https)");
+    axum_server::bind_rustls(addr, tls)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .map_err(|e| Error::Other(format!("api serve: {e}")))?;
+    Ok(())
+}
+
+fn router(state: ApiState) -> Router {
+    Router::new()
         .route("/api/v1/health", get(health_handler))
         .route("/api/v1/status", get(status_handler))
         .route("/api/v1/house", get(house_handler))
@@ -49,23 +82,29 @@ pub async fn serve(config: Config, paths: Paths, health: HealthState, db: Db) ->
             get(devices_handler).post(create_device_handler),
         )
         .route("/api/v1/devices/{id}", delete(delete_device_handler))
+        .route("/api/v1/devices/{id}/command", post(device_command_handler))
         .route(
             "/api/v1/sensors",
             get(sensors_handler).post(create_sensor_handler),
         )
-        .with_state(ApiState {
-            health,
-            paths,
-            config,
-            db,
-        });
-
-    info!(%addr, "api listening (https)");
-    axum_server::bind_rustls(addr, tls)
-        .serve(app.into_make_service())
-        .await
-        .map_err(|e| Error::Other(format!("api serve: {e}")))?;
-    Ok(())
+        .route("/api/v1/presence", get(presence_handler))
+        .route("/api/v1/voice/say", post(voice_say_handler))
+        .route(
+            "/api/v1/conversations/{id}/attachments",
+            post(attachment_handler),
+        )
+        .route(
+            "/api/v1/system/diagnostics/export",
+            post(diagnostics_export_handler),
+        )
+        .route(
+            "/api/v1/system/ownership-transfer",
+            post(ownership_transfer_handler),
+        )
+        .route("/api/v1/system/factory-reset", post(factory_reset_handler))
+        .route("/api/v1/system/update", post(system_update_handler))
+        .route("/ws/events", get(ws::events_handler))
+        .with_state(state)
 }
 
 async fn health_handler(State(state): State<ApiState>) -> Json<crate::health::HealthSnapshot> {
@@ -84,33 +123,30 @@ struct StatusBody {
 
 async fn status_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
-) -> Result<Json<StatusBody>, (StatusCode, String)> {
-    let rec = authorize(&state.paths, &headers, Scope::Read)?;
-    Ok(Json(StatusBody {
+    ReadAuth(rec): ReadAuth,
+) -> Json<StatusBody> {
+    Json(StatusBody {
         status: "ok",
         llm: state.config.llm.url.clone(),
         stt: state.config.stt.url.clone(),
         tts: state.config.tts.url.clone(),
         wake: state.config.wake.keyword.clone(),
         token_id: rec.id,
-    }))
+    })
 }
 
 async fn house_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ReadAuth(_): ReadAuth,
 ) -> Result<Json<crate::model::House>, (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Read)?;
     let house = state.db.load_house().map_err(db_err)?;
     Ok(Json(house))
 }
 
 async fn rooms_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ReadAuth(_): ReadAuth,
 ) -> Result<Json<Vec<Room>>, (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Read)?;
     let house = state.db.load_house().map_err(db_err)?;
     Ok(Json(house.rooms))
 }
@@ -126,10 +162,9 @@ struct RoomDetail {
 
 async fn room_detail_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ReadAuth(_): ReadAuth,
     Path(id): Path<String>,
 ) -> Result<Json<RoomDetail>, (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Read)?;
     let room = state
         .db
         .get_room(&id)
@@ -164,10 +199,9 @@ struct NewRoom {
 
 async fn create_room_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ControlAuth(_): ControlAuth,
     Json(body): Json<NewRoom>,
 ) -> Result<(StatusCode, Json<Room>), (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Control)?;
     let room = Room {
         id: body
             .id
@@ -182,10 +216,9 @@ async fn create_room_handler(
 
 async fn delete_room_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ControlAuth(_): ControlAuth,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Control)?;
     if state.db.delete_room(&id).map_err(db_err)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -195,9 +228,8 @@ async fn delete_room_handler(
 
 async fn devices_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ReadAuth(_): ReadAuth,
 ) -> Result<Json<Vec<Device>>, (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Read)?;
     let house = state.db.load_house().map_err(db_err)?;
     Ok(Json(house.devices))
 }
@@ -213,10 +245,9 @@ struct NewDevice {
 
 async fn create_device_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ControlAuth(_): ControlAuth,
     Json(body): Json<NewDevice>,
 ) -> Result<(StatusCode, Json<Device>), (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Control)?;
     if state.db.get_room(&body.room_id).map_err(db_err)?.is_none() {
         return Err((StatusCode::BAD_REQUEST, "room not found".into()));
     }
@@ -235,10 +266,9 @@ async fn create_device_handler(
 
 async fn delete_device_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ControlAuth(_): ControlAuth,
     Path(id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Control)?;
     if state.db.delete_device(&id).map_err(db_err)? {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -246,11 +276,45 @@ async fn delete_device_handler(
     }
 }
 
+#[derive(Deserialize)]
+struct DeviceCommandBody {
+    action: String,
+    #[serde(default)]
+    params: serde_json::Value,
+}
+
+async fn device_command_handler(
+    State(state): State<ApiState>,
+    ControlAuth(rec): ControlAuth,
+    Path(id): Path<String>,
+    Json(body): Json<DeviceCommandBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let device = state
+        .db
+        .get_device(&id)
+        .map_err(db_err)?
+        .ok_or((StatusCode::NOT_FOUND, "device not found".into()))?;
+    if body.action.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "action required".into()));
+    }
+    let payload = serde_json::json!({
+        "device_id": device.id,
+        "action": body.action,
+        "params": body.params,
+        "token_id": rec.id,
+    });
+    publish(&state.bus, "device.command", &rec, &device.room_id, payload)?;
+    Ok(Json(serde_json::json!({
+        "status": "accepted",
+        "device_id": device.id,
+        "action": body.action,
+    })))
+}
+
 async fn sensors_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ReadAuth(_): ReadAuth,
 ) -> Result<Json<Vec<Sensor>>, (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Read)?;
     let house = state.db.load_house().map_err(db_err)?;
     Ok(Json(house.sensors))
 }
@@ -265,10 +329,9 @@ struct NewSensor {
 
 async fn create_sensor_handler(
     State(state): State<ApiState>,
-    headers: HeaderMap,
+    ControlAuth(_): ControlAuth,
     Json(body): Json<NewSensor>,
 ) -> Result<(StatusCode, Json<Sensor>), (StatusCode, String)> {
-    authorize(&state.paths, &headers, Scope::Control)?;
     let sensor = Sensor {
         id: body
             .id
@@ -281,29 +344,103 @@ async fn create_sensor_handler(
     Ok((StatusCode::CREATED, Json(sensor)))
 }
 
-fn authorize(
-    paths: &Paths,
-    headers: &HeaderMap,
-    required: Scope,
-) -> Result<homeai_common::TokenRecord, (StatusCode, String)> {
-    let raw = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .ok_or((StatusCode::UNAUTHORIZED, "missing authorization".into()))?;
-    let secret = raw
-        .strip_prefix("Bearer ")
-        .ok_or((StatusCode::UNAUTHORIZED, "expected bearer token".into()))?;
-    let store = TokenStore::load(paths.tokens_dir()).map_err(|_| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "token store unreadable".into(),
-        )
-    })?;
-    match store.authorize(secret, required) {
-        Ok(rec) => Ok(rec.clone()),
-        Err(AuthFail::Unauthorized) => Err((StatusCode::UNAUTHORIZED, "invalid token".into())),
-        Err(AuthFail::Forbidden) => Err((StatusCode::FORBIDDEN, "insufficient scope".into())),
+#[derive(Serialize)]
+struct PresenceBody {
+    people: Vec<serde_json::Value>,
+    rooms: Vec<serde_json::Value>,
+}
+
+async fn presence_handler(ReadAuth(_): ReadAuth) -> Json<PresenceBody> {
+    Json(PresenceBody {
+        people: Vec::new(),
+        rooms: Vec::new(),
+    })
+}
+
+#[derive(Deserialize)]
+struct VoiceSayBody {
+    room_id: String,
+    text: String,
+}
+
+async fn voice_say_handler(
+    State(state): State<ApiState>,
+    ControlAuth(rec): ControlAuth,
+    Json(body): Json<VoiceSayBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    if body.text.trim().is_empty() {
+        return Err((StatusCode::BAD_REQUEST, "text required".into()));
     }
+    if state.db.get_room(&body.room_id).map_err(db_err)?.is_none() {
+        return Err((StatusCode::BAD_REQUEST, "room not found".into()));
+    }
+    info!(
+        token_id = %rec.id,
+        room_id = %body.room_id,
+        chars = body.text.len(),
+        "voice.say"
+    );
+    let payload = serde_json::json!({
+        "room_id": body.room_id,
+        "text": body.text,
+        "token_id": rec.id,
+    });
+    publish(&state.bus, "voice.say", &rec, &body.room_id, payload)?;
+    Ok(Json(serde_json::json!({
+        "status": "accepted",
+        "room_id": body.room_id,
+    })))
+}
+
+async fn attachment_handler(
+    ControlAuth(_): ControlAuth,
+    Path(id): Path<String>,
+) -> Json<serde_json::Value> {
+    // UC-244 owns validation, VLM, and retention. Surface exists so auth is real.
+    Json(serde_json::json!({
+        "status": "no_active_request",
+        "conversation_id": id,
+    }))
+}
+
+async fn diagnostics_export_handler(AdminAuth(rec): AdminAuth) -> Json<serde_json::Value> {
+    info!(token_id = %rec.id, "system.diagnostics.export");
+    Json(serde_json::json!({ "status": "pending_consent" }))
+}
+
+async fn ownership_transfer_handler(AdminAuth(rec): AdminAuth) -> Json<serde_json::Value> {
+    info!(token_id = %rec.id, "system.ownership-transfer");
+    Json(serde_json::json!({ "status": "pending_confirmation" }))
+}
+
+async fn factory_reset_handler(AdminAuth(rec): AdminAuth) -> Json<serde_json::Value> {
+    info!(token_id = %rec.id, "system.factory-reset");
+    Json(serde_json::json!({ "status": "pending_confirmation" }))
+}
+
+async fn system_update_handler(AdminAuth(rec): AdminAuth) -> Json<serde_json::Value> {
+    info!(token_id = %rec.id, "system.update");
+    Json(serde_json::json!({ "status": "no_bundle" }))
+}
+
+fn publish(
+    bus: &Bus,
+    event_type: &str,
+    rec: &TokenRecord,
+    room_id: &str,
+    payload: serde_json::Value,
+) -> Result<(), (StatusCode, String)> {
+    static SEQ: AtomicU64 = AtomicU64::new(1);
+    let unique = format!("{}-{}", now_ms(), SEQ.fetch_add(1, Ordering::Relaxed));
+    let mut event = core_event(
+        event_type,
+        &format!("token:{}", rec.id),
+        &unique,
+        payload.to_string().into_bytes(),
+    );
+    event.room_id = room_id.to_string();
+    bus.publish(event)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
 fn db_err(err: crate::db::DbError) -> (StatusCode, String) {

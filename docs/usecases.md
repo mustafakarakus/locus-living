@@ -139,25 +139,35 @@ later without schema migration.
 - [x] Add a device to a room, verify relationship.
 **Notes:** Seed runs only when `property` is empty. GET house/rooms/devices/sensors needs `read`.
 POST/DELETE need `control`. Room `kind` is a string (`indoor`, `garden`, …). Presence on
-room detail is an empty list until presence lands. Auth on remaining routes is the next slice.
+room detail is an empty list until presence lands. Auth lock-down of remaining routes is UC-106.
 **Dependencies:** UC-104.
 
 ### UC-106 — Local API Server (REST + WebSocket)
-**Status:** TODO
+**Status:** DONE
 **Problem:** UI, CLI, and AI need one authenticated local interface.
 **Solution:** Serve the contract in techstack §8 with axum over TLS on 8443. Enforce scoped
 bearer-token auth on every endpoint, including the WebSocket upgrade. Rate-limit failed auth
 attempts with lockout. Provide `WS /ws/events` streaming `HomeEvent` as JSON.
 **Acceptance:**
-- [ ] All endpoints in techstack §8 respond correctly.
-- [ ] Requests without a valid token get 401.
-- [ ] WS upgrade without a valid token is rejected.
-- [ ] Repeated failed auth triggers rate limiting.
-- [ ] `/ws/events` streams live events.
+- [x] All endpoints in techstack §8 respond correctly.
+- [x] Requests without a valid token get 401.
+- [x] WS upgrade without a valid token is rejected.
+- [x] Repeated failed auth triggers rate limiting.
+- [x] `/ws/events` streams live events.
 **Tests:**
-- [ ] Call each endpoint with valid token → 200.
-- [ ] Call with no token → 401.
-- [ ] Subscribe to WS, publish event, verify receipt.
+- [x] Call each endpoint with valid token → 200.
+- [x] Call with no token → 401.
+- [x] Subscribe to WS, publish event, verify receipt.
+**Notes:** `GET /api/v1/health` stays open (UC-103 liveness). All other §8 routes require a
+bearer (`read` / `control` / `admin`; `admin` implies the rest). WS accepts
+`Authorization: Bearer` or `?access_token=`. Failed auth is per client IP: 5 failures in 60s
+lock the IP for 60s (`429`), including later valid tokens. Wrong scope is `403` and does not
+count toward lockout. Device command and `voice/say` publish onto the bus and return
+`accepted` — execution is UC-127 / TTS is UC-119. Presence is an empty list until UC-111.
+Later-milestone POSTs respond honestly without executing: attachments
+`no_active_request` (UC-244), diagnostics `pending_consent` (UC-245), ownership-transfer and
+factory-reset `pending_confirmation` (UC-246), update `no_bundle` (UC-234). Extra house CRUD
+from UC-105 is unchanged.
 **Dependencies:** UC-102, UC-105.
 
 ## Nodes & Devices

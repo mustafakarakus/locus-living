@@ -21,7 +21,7 @@ homeai-proto = { path = "crates/proto" }
 
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["rt"] }
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 tonic = { version = "0.12", features = ["transport", "tls"] }
 tonic-health = "0.12"

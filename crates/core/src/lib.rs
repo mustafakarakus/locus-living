@@ -97,6 +97,7 @@ pub async fn run_with(paths: Paths, shutdown: Option<CancellationToken>) -> Resu
         paths.clone(),
         health.clone(),
         db.clone(),
+        bus.clone(),
     );
     spawn_grpc(&supervisor, config.clone(), paths.clone());
     spawn_retention(&supervisor, bus.clone());
@@ -123,17 +124,27 @@ pub async fn run_with(paths: Paths, shutdown: Option<CancellationToken>) -> Resu
     Ok(())
 }
 
-fn spawn_api(supervisor: &Supervisor, config: Config, paths: Paths, health: HealthState, db: Db) {
+fn spawn_api(
+    supervisor: &Supervisor,
+    config: Config,
+    paths: Paths,
+    health: HealthState,
+    db: Db,
+    bus: Bus,
+) {
     supervisor.spawn("api", move |_child| {
         let config = config.clone();
         let paths = paths.clone();
         let health = health.clone();
         let db = db.clone();
+        let bus = bus.clone();
         async move {
-            api::serve(config, paths, health, db).await.map_err(|err| {
-                error!(error = %err, "api task failed");
-                anyhow::anyhow!(err)
-            })
+            api::serve(config, paths, health, db, bus)
+                .await
+                .map_err(|err| {
+                    error!(error = %err, "api task failed");
+                    anyhow::anyhow!(err)
+                })
         }
     });
 }
