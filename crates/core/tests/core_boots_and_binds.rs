@@ -1,4 +1,4 @@
-//! UC-101: bind ports, JSON log file.
+//! Core starts, binds HTTPS + gRPC, writes JSON logs.
 
 mod common;
 

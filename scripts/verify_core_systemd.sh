@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UC-101 Linux checks: systemctl start/restart → healthy, API up with no default route.
+# Linux: systemctl start/restart → healthy. Run on Ubuntu 24.04 (or CI).
 # Run on Ubuntu 24.04 (or CI). Not executable as proof on macOS.
 set -euo pipefail
 if ! command -v systemctl >/dev/null; then
@@ -44,4 +44,4 @@ if ip route show default >/dev/null 2>&1 && ip route show default | grep -q .; t
   echo "note: default route is present; drop it manually to re-check WAN-off on this host"
 fi
 
-echo "UC-101 linux: systemctl restart → healthy"
+echo "systemd: restart → healthy"

@@ -70,6 +70,10 @@ impl Paths {
         self.tls_dir.join("key.pem")
     }
 
+    pub fn tokens_dir(&self) -> PathBuf {
+        self.tls_dir.join("tokens")
+    }
+
     pub fn ensure_runtime_dirs(&self) -> std::io::Result<()> {
         if let Some(parent) = self.db.parent() {
             std::fs::create_dir_all(parent)?;
@@ -77,11 +81,24 @@ impl Paths {
         std::fs::create_dir_all(&self.log_dir)?;
         std::fs::create_dir_all(&self.updates)?;
         std::fs::create_dir_all(&self.tls_dir)?;
+        create_private_dir(&self.tokens_dir())?;
         if let Some(parent) = self.config.parent() {
             std::fs::create_dir_all(parent)?;
         }
         Ok(())
     }
+}
+
+fn create_private_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(path)?.permissions();
+        perms.set_mode(0o700);
+        std::fs::set_permissions(path, perms)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

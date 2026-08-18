@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UC-101: run Core with WAN denied (macOS sandbox) and prove the API still answers.
+# Run Core with WAN denied (macOS sandbox) and prove the API still answers.
 set -euo pipefail
 repo="$(cd "$(dirname "$0")/.." && pwd)"
 prefix="${HOMEAI_PREFIX:-$repo/.run}"
@@ -33,4 +33,4 @@ if sandbox-exec -f "$sb" /usr/bin/curl -sS --max-time 3 https://example.com -o /
   exit 1
 fi
 
-echo "UC-101 offline: API responded with WAN denied"
+echo "offline: API responded with WAN denied"

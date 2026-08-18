@@ -12,3 +12,5 @@ path = "src/main.rs"
 
 [dependencies]
 homeai-common.workspace = true
+clap.workspace = true
+anyhow.workspace = true

@@ -15,7 +15,7 @@ pub mod tls;
 
 use std::time::Duration;
 
-use homeai_common::{Config, Paths};
+use homeai_common::{Config, Paths, TokenStore};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
@@ -36,6 +36,8 @@ pub enum Error {
     Tls(#[from] tls::TlsError),
     #[error(transparent)]
     Db(#[from] db::DbError),
+    #[error(transparent)]
+    Token(#[from] homeai_common::TokenError),
     #[error("{0}")]
     Other(String),
 }
@@ -58,6 +60,15 @@ pub async fn run_with(paths: Paths, shutdown: Option<CancellationToken>) -> Resu
     );
 
     let config = Config::load(&paths.config)?;
+    let tokens = TokenStore::load(paths.tokens_dir())?;
+    info!(
+        llm = %config.llm.url,
+        stt = %config.stt.url,
+        tts = %config.tts.url,
+        wake = %config.wake.keyword,
+        tokens = tokens.list().len(),
+        "config loaded"
+    );
     if paths.is_prefixed() {
         tls::ensure_dev_certs(&paths)?;
     }

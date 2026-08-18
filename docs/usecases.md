@@ -53,9 +53,9 @@ Dev machines set `HOMEAI_PREFIX` so the same tree lives under that directory (te
 - [x] Disconnect WAN → API still responds.
 - [x] Kill an internal task → supervisor restarts it.
 **Notes:** WAN was verified on macOS: process has no remote ESTABLISHED TCP after boot, and
-`scripts/uc101-offline-verify.sh` serves `/api/v1/health` under a sandbox that denies WAN.
+`scripts/verify_core_offline.sh` serves `/api/v1/health` under a sandbox that denies WAN.
 Unit file is `deploy/systemd/homeai-core.service` (starts after `local-fs.target`, not
-`network-online`). systemd start/restart/reboot is `scripts/uc101-linux-verify.sh` — needs
+`network-online`). systemd start/restart/reboot is `scripts/verify_core_systemd.sh` — needs
 Ubuntu; this Mac has no systemctl. Full API auth is UC-106; NodeService mTLS is UC-107;
 event persist is UC-102; schema is UC-104.
 **Dependencies:** None.
@@ -85,7 +85,7 @@ everything else 90d, swept by the supervised `retention` task.
 **Dependencies:** UC-101.
 
 ### UC-103 — Configuration & Secrets
-**Status:** TODO
+**Status:** DONE
 **Problem:** Behavior must be configurable without recompiling.
 **Solution:** Load `/etc/homeai/config.toml` via serde: `[api] port=8443`, `[grpc] port=50051`,
 `[llm] url="http://127.0.0.1:8200"`, `[stt] url="http://127.0.0.1:8100"`,
@@ -93,12 +93,15 @@ everything else 90d, swept by the supervised `retention` task.
 Per-client bearer tokens (scopes: `read`, `control`, `admin`) under `/etc/homeai/tls/tokens/`,
 mode 0600; created, rotated, and revoked via `homeai admin token`.
 **Acceptance:**
-- [ ] Ports/URLs read from config, not hardcoded.
-- [ ] Invalid config fails startup with a clear error.
-- [ ] Token files are not world-readable; tokens are scoped and revocable.
+- [x] Ports/URLs read from config, not hardcoded.
+- [x] Invalid config fails startup with a clear error.
+- [x] Token files are not world-readable; tokens are scoped and revocable.
 **Tests:**
-- [ ] Change a port → service binds new port.
-- [ ] Malformed TOML → startup fails with message.
+- [x] Change a port → service binds new port.
+- [x] Malformed TOML → startup fails with message.
+**Notes:** `GET /api/v1/health` stays open (liveness). `GET /api/v1/status` requires a `read`
+bearer and echoes llm/stt/tts/wake from config. `admin` implies read+control. World-readable
+token files refuse to load. Full endpoint lock-down is UC-106.
 **Dependencies:** UC-101.
 
 ### UC-104 — Local Storage (SQLite)

@@ -9,7 +9,13 @@ pub fn write_dev_tree(root: &std::path::Path, api_port: u16, grpc_port: u16) -> 
     paths.ensure_runtime_dirs().unwrap();
     tls::write_self_signed(&paths.tls_cert(), &paths.tls_key()).unwrap();
     let cfg = format!(
-        "[api]\nhost = \"127.0.0.1\"\nport = {api_port}\n\n[grpc]\nhost = \"127.0.0.1\"\nport = {grpc_port}\n"
+        "[api]\nhost = \"127.0.0.1\"\nport = {api_port}\n\n\
+         [grpc]\nhost = \"127.0.0.1\"\nport = {grpc_port}\n\n\
+         [llm]\nurl = \"http://127.0.0.1:8200\"\n\n\
+         [stt]\nurl = \"http://127.0.0.1:8100\"\n\n\
+         [tts]\nurl = \"http://127.0.0.1:8300\"\n\n\
+         [presence]\nexit_delay_ms = 30000\n\n\
+         [wake]\nkeyword = \"hey home\"\n"
     );
     std::fs::write(&paths.config, cfg).unwrap();
     let _ = Config::load(&paths.config).unwrap();

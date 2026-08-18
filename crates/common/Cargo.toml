@@ -10,3 +10,4 @@ description = "Shared types, paths, and config for Home AI."
 serde = { workspace = true }
 toml = { workspace = true }
 thiserror = { workspace = true }
+rand = { workspace = true }

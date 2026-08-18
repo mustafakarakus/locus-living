@@ -2,9 +2,13 @@
 
 mod config;
 mod paths;
+mod tokens;
 
-pub use config::{ApiConfig, Config, ConfigError, GrpcConfig};
+pub use config::{
+    ApiConfig, Config, ConfigError, GrpcConfig, PresenceConfig, ServiceUrl, WakeConfig,
+};
 pub use paths::Paths;
+pub use tokens::{AuthFail, Scope, TokenError, TokenRecord, TokenStore};
 
 pub const API_PORT: u16 = 8443;
 pub const GRPC_PORT: u16 = 50051;

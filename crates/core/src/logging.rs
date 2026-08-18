@@ -14,13 +14,13 @@ pub fn init(log_dir: &Path) -> std::io::Result<WorkerGuard> {
     let file_writer = non_blocking.with_max_level(tracing::Level::TRACE);
     let stderr_writer = std::io::stderr.with_max_level(tracing::Level::TRACE);
 
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .json()
         .with_env_filter(filter)
         .with_writer(stderr_writer.and(file_writer))
         .with_current_span(true)
         .with_span_list(false)
-        .init();
+        .try_init();
 
     Ok(guard)
 }

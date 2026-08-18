@@ -1,4 +1,4 @@
-//! UC-101: WAN disconnected — API still responds; process opens no remote sockets.
+//! Core answers health with no remote TCP — WAN is not required.
 
 mod common;
 
